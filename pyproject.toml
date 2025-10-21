@@ -1,3 +1,7 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
 [project]
 name = "glide"
 version = "0.1.0"
@@ -13,3 +17,7 @@ dependencies = [
     "pytest-asyncio>=1.2.0",
     "python-dotenv>=1.1.1",
 ]
+
+[tool.maturin]
+python-source = "src"
+module-name = "glide"

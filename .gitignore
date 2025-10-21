@@ -1,2 +1,32 @@
 .venv/
 .env
+
+# Python compiled extensions
+*.pyd
+*.so
+*.dylib
+
+# Maturin build artifacts
+*.whl
+dist/
+build/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

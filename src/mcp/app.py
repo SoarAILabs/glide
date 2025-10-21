@@ -2,10 +2,10 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("glide")
 
-
 @mcp.tool
 async def commit_splitter():
-    pass
+    from glide import commit_splitter
+    return commit_splitter()
 
 
 @mcp.tool

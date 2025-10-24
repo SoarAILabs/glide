@@ -3,7 +3,7 @@ from fastmcp import FastMCP
 mcp = FastMCP("glide")
 
 @mcp.tool
-async def commit_splitter():
+def commit_splitter():
     from glide import commit_splitter
     return commit_splitter()
 
@@ -28,4 +28,4 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=5000)

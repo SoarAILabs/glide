@@ -7,7 +7,7 @@ mod kite_exclusive {
         }
     }
 }
-use kite_exclusive::commit_splitter::rs::commit_core::{commit_splitter, gemini_service, helix_service, voyage_service};
+use kite_exclusive::commit_splitter::rs::commit_core::{commit_splitter, gemini_service, helix_service, embed_service};
 
 
 #[pymodule]
@@ -15,6 +15,6 @@ fn glide(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(commit_splitter, m)?)?;
     m.add_function(wrap_pyfunction!(gemini_service, m)?)?;
     m.add_function(wrap_pyfunction!(helix_service, m)?)?;
-    m.add_function(wrap_pyfunction!(voyage_service, m)?)?;
+    m.add_function(wrap_pyfunction!(embed_service, m)?)?;
     Ok(())
 }

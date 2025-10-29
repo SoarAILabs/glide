@@ -1,6 +1,9 @@
+from typing import Any
+
+
 from fastmcp import FastMCP
 
-mcp = FastMCP("glide")
+mcp = FastMCP[Any]("glide")
 
 
 @mcp.tool
@@ -21,6 +24,9 @@ async def draft_pr():
     result += "please follow these steps to draft a pull request: \n\n"
     return result
 
+@mcp.tool
+async def split_commit():
+    return "split commit ran successfully"
 
 @mcp.tool
 async def resolve_conflict():

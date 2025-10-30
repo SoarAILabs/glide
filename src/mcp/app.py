@@ -1,4 +1,5 @@
 from pickle import NONE
+from src.kite_exclusive.commit_splitter.services.voyage_service import embed_code
 from typing import Any, Optional
 import subprocess
 
@@ -19,21 +20,21 @@ async def draft_pr():
     result += "please follow these steps to draft a pull request: \n\n"
     return result
 
-@mcp.tool(name="split_commit", description="split a large unified diff into smaller semantically-grouped commits. Requires a unified git diff string as input.")
+@mcp.tool(name="split_commit", description="Splits a large unified diff / commit into smaller semantically-grouped commits.")
 async def split_commit():
     try: 
         git_diff = subprocess.run(["git", "diff"], capture_output=True, text=True)
-        # convert git_diff to the embeddings 
-        # pass the embeddings to the helix
-        # get the helix response 
+        code_embeddings = embed_code(git_diff.stdout)
+        # helix_service(code_embeddings)
+        # get the helix response
         # use the helix response to split the commit
-        # return the split commit 
+        # return the split commit
     except Exception as e:
         return (
             "failed to get git diff.\n"
             "Please check if you are in a git repository and try again."
         )
-
+    return None # type: ignore
 
 @mcp.tool
 async def resolve_conflict():

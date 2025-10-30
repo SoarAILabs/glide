@@ -1,2 +1,5 @@
-.venv/
-.env
+.helix/
+target/
+*.log
+
+*.env

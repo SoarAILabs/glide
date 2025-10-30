@@ -342,6 +342,23 @@ wheels = [
 ]
 
 [[package]]
+name = "cerebras-cloud-sdk"
+version = "1.56.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/cc/a0b2da54ed9f0b2a863b95355f6555ec25cf75088b3a554e4d7aeaaac80d/cerebras_cloud_sdk-1.56.1.tar.gz", hash = "sha256:13e5fa85b95f3da2ab9505d4155f4fcf2c5819e95245065907e4c5a27b5413cf", size = 126245, upload-time = "2025-10-22T19:19:29.655Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/32/72bb7bd4cda23367c6c6634426a81ad2e42ff3a8867ca5ed3b8817f23422/cerebras_cloud_sdk-1.56.1-py3-none-any.whl", hash = "sha256:92a412421adbf6025dde68f204fc21de14e3c733a64ffa4cfac933d9b680f37c", size = 94995, upload-time = "2025-10-22T19:19:28.182Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.10.5"
 source = { registry = "https://pypi.org/simple" }
@@ -958,6 +975,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "black" },
+    { name = "cerebras-cloud-sdk" },
     { name = "fastmcp" },
     { name = "helix-py" },
     { name = "numpy" },
@@ -969,6 +987,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "black", specifier = ">=25.9.0" },
+    { name = "cerebras-cloud-sdk", specifier = ">=1.56.1" },
     { name = "fastmcp", specifier = ">=2.12.5" },
     { name = "helix-py", specifier = ">=0.2.30" },
     { name = "numpy", specifier = ">=2.3.4" },

@@ -1,15 +1,10 @@
-from typing import Any
-
+from pickle import NONE
+from typing import Any, Optional
+import subprocess
 
 from fastmcp import FastMCP
 
 mcp = FastMCP[Any]("glide")
-
-
-@mcp.tool
-async def commit_splitter():
-    pass
-
 
 @mcp.tool
 async def draft_pr():
@@ -24,9 +19,21 @@ async def draft_pr():
     result += "please follow these steps to draft a pull request: \n\n"
     return result
 
-@mcp.tool
+@mcp.tool(name="split_commit", description="split a large unified diff into smaller semantically-grouped commits. Requires a unified git diff string as input.")
 async def split_commit():
-    return "split commit ran successfully"
+    try: 
+        git_diff = subprocess.run(["git", "diff"], capture_output=True, text=True)
+        # convert git_diff to the embeddings 
+        # pass the embeddings to the helix
+        # get the helix response 
+        # use the helix response to split the commit
+        # return the split commit 
+    except Exception as e:
+        return (
+            "failed to get git diff.\n"
+            "Please check if you are in a git repository and try again."
+        )
+
 
 @mcp.tool
 async def resolve_conflict():
@@ -34,4 +41,4 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)
+    mcp.run(transport="stdio")

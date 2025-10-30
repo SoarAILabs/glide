@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "black>=25.9.0",
+    "cerebras-cloud-sdk>=1.56.1",
     "fastmcp>=2.12.5",
     "helix-py>=0.2.30",
     "numpy>=2.3.4",

@@ -1,4 +1,3 @@
-from pickle import NONE
 from src.kite_exclusive.commit_splitter.services.voyage_service import embed_code
 from src.core.LLM.cerebras_inference import complete
 from typing import Any, Dict, List, Tuple
@@ -6,7 +5,6 @@ import subprocess
 import json
 import os
 
-# Helix Python client (Context7 docs: /helixdb/helix-py)
 import helix
 
 from fastmcp import FastMCP
@@ -30,19 +28,29 @@ async def draft_pr():
 async def split_commit():
     try:
         # 1) Collect changed files and per-file unified diffs
-        files_proc = subprocess.run(["git", "diff", "--name-only"], capture_output=True, text=True)
-        if files_proc.returncode != 0:
-            return "failed to enumerate changed files via git diff --name-only"
-        changed_files = [f.strip() for f in files_proc.stdout.splitlines() if f.strip()]
+        # Check both staged and unstaged changes
+        staged_proc = subprocess.run(["git", "diff", "--cached", "--name-only"], capture_output=True, text=True)
+        unstaged_proc = subprocess.run(["git", "diff", "--name-only"], capture_output=True, text=True)
+        
+        changed_files = set()
+        if staged_proc.returncode == 0:
+            changed_files.update(f.strip() for f in staged_proc.stdout.splitlines() if f.strip())
+        if unstaged_proc.returncode == 0:
+            changed_files.update(f.strip() for f in unstaged_proc.stdout.splitlines() if f.strip())
+        
         if not changed_files:
             return "no changes detected (working tree clean)"
 
         file_to_diff: Dict[str, str] = {}
         for path in changed_files:
-            p = subprocess.run(["git", "diff", "--", path], capture_output=True, text=True)
-            if p.returncode != 0:
-                continue
-            file_to_diff[path] = p.stdout
+            # Try staged diff first, then unstaged
+            p = subprocess.run(["git", "diff", "--cached", "--", path], capture_output=True, text=True)
+            if p.returncode == 0 and p.stdout.strip():
+                file_to_diff[path] = p.stdout
+            else:
+                p = subprocess.run(["git", "diff", "--", path], capture_output=True, text=True)
+                if p.returncode == 0 and p.stdout.strip():
+                    file_to_diff[path] = p.stdout
 
         if not file_to_diff:
             return "no per-file diffs produced"
@@ -54,13 +62,13 @@ async def split_commit():
         db = helix.Client(local=True)
 
         for file_path, diff_text in file_to_diff.items():
-            vec_batch = embed_code(diff_text)  # returns a batch; take first vector
+            vec_batch = embed_code(diff_text, file_path=file_path)  # returns a batch; take first vector
             if not vec_batch:
                 continue
             vec = vec_batch[0]
 
             # 3) ANN search for similar diffs; k kept small to keep it snappy
-            res = db.query("SearchSimilarDiffsByVector", {"vec": vec, "k": 8})
+            res = db.query("getSimilarDiffsByVector", {"vec": vec, "k": 8})
             # Result rows include commit_message, summary, file_path
             examples = []
             if isinstance(res, list):
@@ -104,9 +112,10 @@ async def split_commit():
         report = {"commits": [{"file": f, "message": m} for f, m in suggestions]}
         return json.dumps(report, indent=2)
 
-    except Exception:
+    except Exception as e:
         return (
-            "failed to split commit.\n"
+            f"failed to split commit: {str(e)}\n"
+            f"Exception type: {type(e).__name__}\n"
             "Ensure git is available and HelixDB is reachable on localhost:6969."
         )
 
@@ -116,4 +125,4 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)

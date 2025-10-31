@@ -81,7 +81,7 @@ async def split_commit():
             if isinstance(res, list):
                 for row in res[:5]:
                     if isinstance(row, dict):
-                        ex_msg = row.get("commit_message") or ""
+                        ex_msg = row.get("message") or ""
                         ex_sum = row.get("summary") or ""
                         ex_path = row.get("file_path") or ""
                         if ex_msg or ex_sum:

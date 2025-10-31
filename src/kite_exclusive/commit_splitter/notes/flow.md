@@ -1,8 +1,0 @@
-- user calls tool -> asks to split commits 
-- we get git diff
-- generate embeddings -> voyage code 3 
-- pass diff to helix
-- save in helix 
-- generate semantic groups with gemini -> [model name]
-- send the commit message and file names back 
-- tell client -> use commit message and file names to make each a unique commit

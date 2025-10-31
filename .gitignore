@@ -1,0 +1,9 @@
+.helix/
+target/
+*.log
+
+*.env
+
+__pycache__/
+
+glide.egg-info/

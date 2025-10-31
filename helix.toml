@@ -1,0 +1,12 @@
+[project]
+name = "glide"
+queries = "./db/"
+
+[local.dev]
+port = 6969
+build_mode = "dev"
+
+[local.glide]
+build_mode = "dev"
+
+[cloud]

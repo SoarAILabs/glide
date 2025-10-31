@@ -6,4 +6,7 @@ queries = "./db/"
 port = 6969
 build_mode = "debug"
 
+[local.glide]
+build_mode = "debug"
+
 [cloud]

@@ -66,9 +66,18 @@ async def split_commit():
             if not vec_batch:
                 continue
             vec = vec_batch[0]
+            
+
+            try: 
 
             # 3) ANN search for similar diffs; k kept small to keep it snappy
-            res = db.query("getSimilarDiffsByVector", {"vec": vec, "k": 8})
+                res = db.query("getSimilarDiffsByVector", {"vec": vec, "k": 8})
+            except Exception as db_exc: 
+                return (
+                    f"Database query failed for file '{file_path}': {str(db_exc)}\n"
+                    f"Exception type: {type(db_exc).__name__}\n"
+                    "Ensure HelixDB is reachable and the query is correct."
+                )
             # Result rows include commit_message, summary, file_path
             examples = []
             if isinstance(res, list):
@@ -125,4 +134,4 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)

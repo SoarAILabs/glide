@@ -1,43 +1,77 @@
 // Nodes
 N::Repository {
-  repo_id: String PRIMARY KEY,
-  name: String UNIQUE,
+  INDEX repo_id: String,
+  INDEX name: String,
   created_at: Date DEFAULT NOW
 }
 
 N::Branch {
-  branch_id: String PRIMARY KEY,
+  INDEX branch_id: String,
   name: String,
   created_at: Date DEFAULT NOW
 }
 
 N::Commit {
-  commit_id: String PRIMARY KEY,    // full hash
-  short_id: String,                 // optional short hash
+  INDEX commit_id: String,
+  short_id: String,
   author: String,
   message: String,
   committed_at: Date,
-  is_merge: Bool DEFAULT false
+  is_merge: Boolean DEFAULT false
 }
 
 N::File {
-  file_id: String PRIMARY KEY,
-  path: String,                     // repo-relative path
-  language: String                  // optional, for better grouping
+  INDEX file_id: String,
+  path: String,
+  language: String
 }
 
 N::Diff {
-  diff_id: String PRIMARY KEY,
-  kind: String,                     // add|mod|del|rename|move|meta
-  additions: Int,
-  deletions: Int,
-  summary: String,                  // LLM-ready textual summary
-  embedding: Vector<1536> INDEX HNSW(metric: COSINE)
+  INDEX diff_id: String,
+  kind: String,
+  additions: I64,
+  deletions: I64,
+  summary: String
+}
+
+// Vector type for embeddings
+V::DiffEmbedding {
+  vector: [F64]
 }
 
 // Edges
-E::HAS_BRANCH(Repository -> Branch)
-E::HAS_COMMIT(Branch -> Commit)
-E::PARENT(Commit -> Commit)
-E::HAS_DIFF(Commit -> Diff)
-E::AFFECTS_FILE(Diff -> File)
+E::HAS_BRANCH {
+  From: Repository,
+  To: Branch,
+  Properties: {}
+}
+
+E::HAS_COMMIT {
+  From: Branch,
+  To: Commit,
+  Properties: {}
+}
+
+E::PARENT {
+  From: Commit,
+  To: Commit,
+  Properties: {}
+}
+
+E::HAS_DIFF {
+  From: Commit,
+  To: Diff,
+  Properties: {}
+}
+
+E::AFFECTS_FILE {
+  From: Diff,
+  To: File,
+  Properties: {}
+}
+
+E::HAS_EMBEDDING {
+  From: Diff,
+  To: DiffEmbedding,
+  Properties: {}
+}

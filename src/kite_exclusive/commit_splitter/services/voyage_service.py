@@ -2,8 +2,8 @@ from helix.embedding.voyageai_client import VoyageAIEmbedder
 from helix import Chunk
 import os
 
+voyage_embedder = VoyageAIEmbedder()
 def embed_code(code: str, file_path: str = None):
-    voyage_embedder = VoyageAIEmbedder()
     
     # For diffs, use token_chunk instead of code_chunk since diffs are text format
     # and code_chunk has API compatibility issues

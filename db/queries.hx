@@ -3,34 +3,34 @@
 
 // Ingestion helpers
 
-// EnsureRepository: creates the root repository node; needed to scope all data.
-QUERY EnsureRepository(repo_id: String, name: String) =>
+// createRepository: creates the root repository node; needed to scope all data.
+QUERY createRepository(repo_id: String, name: String) =>
     repo <- AddN<Repository>({
         repo_id: repo_id,
         name: name
     })
     RETURN repo
 
-// EnsureBranch: creates a branch and links it to its repo; required for per-branch traversals.
-QUERY EnsureBranch(repo_id: String, branch_id: String, name: String) =>
-    repo <- N<Repository>(repo_id)
+// createBranch: creates a branch and links it to its repo
+QUERY createBranch(repo_id: String, branch_id: String, name: String) =>
+    repo <- N<Repository>({repo_id: repo_id})
     branch <- AddN<Branch>({
         branch_id: branch_id,
         name: name
     })
-    AddE<HAS_BRANCH>::From(repo)::To(branch_id)
+    AddE<HAS_BRANCH>()::From(repo)::To(branch)
     RETURN branch
 
-// EnsureCommit: creates a commit on a branch; base unit for linking diffs and DAG parents.
-QUERY EnsureCommit(
+// createCommit: creates a commit on a branch
+QUERY createCommit(
     branch_id: String,
     commit_id: String,
     short_id: String,
     author: String,
     committed_at: Date,
-    is_merge: Bool
+    is_merge: Boolean
 ) =>
-    branch <- N<Branch>(branch_id)
+    branch <- N<Branch>({branch_id: branch_id})
     commit <- AddN<Commit>({
         commit_id: commit_id,
         short_id: short_id,
@@ -38,18 +38,20 @@ QUERY EnsureCommit(
         committed_at: committed_at,
         is_merge: is_merge
     })
-    AddE<HAS_COMMIT>::From(branch)::To(commit_id)
+    AddE<HAS_COMMIT>()::From(branch)::To(commit)
     RETURN commit
 
-// LinkParentCommit: records DAG parentage; required to reconstruct history and merges.
-QUERY LinkParentCommit(child_commit_id: String, parent_commit_id: String) =>
-    child <- N<Commit>(child_commit_id)
-    parent <- N<Commit>(parent_commit_id)
-    AddE<PARENT>::From(child)::To(parent_commit_id)
+
+// LinkParentCommit: records DAG parentage
+QUERY linkParentCommit(child_commit_id: String, parent_commit_id: String) =>
+    child <- N<Commit>({commit_id: child_commit_id})
+    parent <- N<Commit>({commit_id: parent_commit_id})
+    AddE<PARENT>()::From(child)::To(parent)
     RETURN "OK"
 
-// EnsureFile: creates a file node; enables path-scoped queries and file-level analytics.
-QUERY EnsureFile(file_id: String, path: String, language: String) =>
+
+// createFile: creates a file node; enables path-scoped queries and file-level analytics.
+QUERY createFile(file_id: String, path: String, language: String) =>
     file <- AddN<File>({
         file_id: file_id,
         path: path,
@@ -57,8 +59,9 @@ QUERY EnsureFile(file_id: String, path: String, language: String) =>
     })
     RETURN file
 
-// IngestDiff: attaches a diff with a precomputed Voyage vector; enables ANN over code changes.
-QUERY IngestDiff(
+
+// createDiff: attaches a diff with a precomputed Voyage vector
+QUERY createDiff(
     commit_id: String,
     file_id: String,
     diff_id: String,
@@ -68,54 +71,61 @@ QUERY IngestDiff(
     summary: String,
     vec: [F64]
 ) =>
-    commit <- N<Commit>(commit_id)
-    file <- N<File>(file_id)
+    commit <- N<Commit>({commit_id: commit_id})
+    file <- N<File>({file_id: file_id})
     diff <- AddN<Diff>({
         diff_id: diff_id,
         kind: kind,
         additions: additions,
         deletions: deletions,
-        summary: summary,
-        embedding: vec
+        summary: summary
     })
-    AddE<HAS_DIFF>::From(commit)::To(diff_id)
-    AddE<AFFECTS_FILE>::From(diff)::To(file_id)
+    embedding <- AddV<DiffEmbedding>(vec)
+    AddE<HAS_DIFF>()::From(commit)::To(diff)
+    AddE<AFFECTS_FILE>()::From(diff)::To(file)
+    AddE<HAS_EMBEDDING>()::From(diff)::To(embedding)
     RETURN diff
+
+
+
 
 // Search & retrieval
 
-// SearchSimilarDiffsByVector: ANN over diffs using Voyage vectors; core primitive for similarity.
-QUERY SearchSimilarDiffsByVector(vec: [F64], k: I64) =>
-    results <- SearchV<Diff>(vec, k)
+// getSimilarDiffsByVector: ANN over diffs using vectors
+QUERY getSimilarDiffsByVector(vec: [F64], k: I64) =>
+    embeddings <- SearchV<DiffEmbedding>(vec, k)
+    results <- embeddings::In<HAS_EMBEDDING>
     RETURN results::{
         diff_id: diff_id,
         kind: kind,
         additions: additions,
         deletions: deletions,
         summary: summary,
-        commit_id: _::In<HAS_DIFF>::commit_id,
-        commit_message: _::In<HAS_DIFF>::message,
-        file_path: _::Out<AFFECTS_FILE>::path
+        commit_id: _::In<HAS_DIFF>::{commit_id},
+        commit_message: _::In<HAS_DIFF>::{message},
+        file_path: _::Out<AFFECTS_FILE>::{path}
     }
 
-// GetDiffIdsForRepo: collects diff IDs under a repo; used to intersect with ANN results.
-QUERY GetDiffIdsForRepo(repo_id: String) =>
-    diffs <- N<Repository>(repo_id)::Out<HAS_BRANCH>::Out<HAS_COMMIT>::Out<HAS_DIFF>
+
+// getDiffIdsForRepo: collects diff IDs under a repo
+QUERY getDiffIdsForRepo(repo_id: String) =>
+    diffs <- N<Repository>({repo_id: repo_id})::Out<HAS_BRANCH>::Out<HAS_COMMIT>::Out<HAS_DIFF>
     RETURN diffs::{ diff_id: diff_id }
 
-// GetDiffIdsForBranch: collects diff IDs under a branch; narrows similarity to a branch.
-QUERY GetDiffIdsForBranch(branch_id: String) =>
-    diffs <- N<Branch>(branch_id)::Out<HAS_COMMIT>::Out<HAS_DIFF>
+
+// getDiffIdsForBranch: collects diff IDs under a branch
+QUERY getDiffIdsForBranch(branch_id: String) =>
+    diffs <- N<Branch>({branch_id: branch_id})::Out<HAS_COMMIT>::Out<HAS_DIFF>
     RETURN diffs::{ diff_id: diff_id }
 
-// GetCommitDiffSummaries: returns per-diff summaries and paths for a commit; input to LLM summarizer.
-QUERY GetCommitDiffSummaries(commit_id: String) =>
-    diffs <- N<Commit>(commit_id)::Out<HAS_DIFF>
+// GetCommitDiffSummaries: returns per-diff summaries and paths for a commit
+QUERY getCommitDiffSummaries(commit_id: String) =>
+    diffs <- N<Commit>({commit_id: commit_id})::Out<HAS_DIFF>
     RETURN diffs::{
         diff_id: diff_id,
         kind: kind,
         additions: additions,
         deletions: deletions,
         summary: summary,
-        file_path: _::Out<AFFECTS_FILE>::path
+        file_path: _::Out<AFFECTS_FILE>::{path}
     }

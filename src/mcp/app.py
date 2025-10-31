@@ -19,9 +19,8 @@ async def draft_pr():
         "step 3: use the edit file tool to write a new PR_DRAFT.md file for the project.",
     ]
     result = "draft pr instructions: \n\n"
-    for i, instruction in enumerate(instructions, 1):
+    for i, instruction in enumerate[str](instructions, 1):
         result += f"{i}. {instruction}\n\n"
-    result += "please follow these steps to draft a pull request: \n\n"
     return result
 
 @mcp.tool(name="split_commit", description="Splits a large unified diff / commit into smaller semantically-grouped commits.")
@@ -69,8 +68,7 @@ async def split_commit():
             
 
             try: 
-
-            # 3) ANN search for similar diffs; k kept small to keep it snappy
+                # 3) ANN search for similar diffs; k kept small to keep it snappy
                 res = db.query("getSimilarDiffsByVector", {"vec": vec, "k": 8})
             except Exception as db_exc: 
                 return (
@@ -114,8 +112,15 @@ async def split_commit():
 
         # 4) Commit each file separately with its suggested message
         for file_path, message in suggestions:
-            subprocess.run(["git", "add", "--", file_path], check=False)
-            subprocess.run(["git", "commit", "-m", message], check=False)
+            try: 
+                subprocess.run(["git", "add", "--", file_path], check=True)
+                subprocess.run(["git", "commit", "-m", message], check=True)
+            except subprocess.CalledProcessError as e: 
+                return (
+                    f"Failed to add or commit '{file_path}' with message '{message}'.\n"
+                    f"Git error: {e}\n"
+                    "Ensure the file exists, is not conflicted, and git is functioning properly."
+                )
 
         # 5) Return a compact report of what was committed
         report = {"commits": [{"file": f, "message": m} for f, m in suggestions]}

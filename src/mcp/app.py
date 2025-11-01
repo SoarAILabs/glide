@@ -13,8 +13,6 @@ load_dotenv()
 mcp = FastMCP[Any]("glide")
 
 HELIX_API_ENDPOINT = os.getenv("HELIX_API_ENDPOINT", "")
-if not HELIX_API_ENDPOINT:
-    raise ValueError("HELIX_API_ENDPOINT is not set")
 
 @mcp.tool
 async def draft_pr():
@@ -108,6 +106,8 @@ async def split_commit():
             # Use cloud deployment from helix.toml (production.fly)
             # Helix SDK automatically reads helix.toml and uses the configured deployment
             api_endpoint = os.getenv("HELIX_API_ENDPOINT", "")
+            if not HELIX_API_ENDPOINT:
+                return "error: HELIX API ENDPOINT is not set"
             db = helix.Client(local=False, api_endpoint=api_endpoint)
 
         for file_path, diff_text in file_to_diff.items():
@@ -217,4 +217,5 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)
+    # mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)
+    mcp.run(transport="stdio")

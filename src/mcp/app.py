@@ -5,13 +5,16 @@ import subprocess
 import json
 import os
 import asyncio
-
+from dotenv import load_dotenv
 import helix
-
 from fastmcp import FastMCP
+load_dotenv()
 
 mcp = FastMCP[Any]("glide")
 
+HELIX_API_ENDPOINT = os.getenv("HELIX_API_ENDPOINT", "")
+if not HELIX_API_ENDPOINT:
+    raise ValueError("HELIX_API_ENDPOINT is not set")
 
 @mcp.tool
 async def draft_pr():
@@ -96,26 +99,51 @@ async def split_commit():
         # 2) Embed each file's diff with Voyage (preconfigured in voyage_service)
         suggestions: List[Tuple[str, str]] = []  # (file_path, suggested_message)
 
-        # Connect Helix client (local by default; adjust via env if needed)
-        db = helix.Client(local=True)
+        # Connect Helix client - supports both local and cloud via environment variables
+        use_local = os.getenv("HELIX_LOCAL", "false").lower() == "true"
+        
+        if use_local:
+            db = helix.Client(local=True)
+        else:
+            # Use cloud deployment from helix.toml (production.fly)
+            # Helix SDK automatically reads helix.toml and uses the configured deployment
+            api_endpoint = os.getenv("HELIX_API_ENDPOINT", "")
+            db = helix.Client(local=False, api_endpoint=api_endpoint)
 
         for file_path, diff_text in file_to_diff.items():
-            vec_batch = embed_code(
-                diff_text, file_path=file_path
-            )  # returns a batch; take first vector
+            try:
+                # 2a) Embed with timeout (5 seconds)
+                vec_batch = await asyncio.wait_for(
+                    asyncio.to_thread(embed_code, diff_text, file_path=file_path),
+                    timeout=5
+                )
+            except asyncio.TimeoutError:
+                # If embedding times out, skip this file and use a fallback message
+                suggestions.append((file_path, f"Update {os.path.basename(file_path)}"))
+                continue
+            except Exception as embed_exc:
+                # If embedding fails, skip this file
+                suggestions.append((file_path, f"Update {os.path.basename(file_path)}"))
+                continue
+                
             if not vec_batch:
+                suggestions.append((file_path, f"Update {os.path.basename(file_path)}"))
                 continue
             vec = vec_batch[0]
 
             try:
                 # 3) ANN search for similar diffs; k kept small to keep it snappy
-                res = db.query("getSimilarDiffsByVector", {"vec": vec, "k": 8})
-            except Exception as db_exc:
-                return (
-                    f"Database query failed for file '{file_path}': {str(db_exc)}\n"
-                    f"Exception type: {type(db_exc).__name__}\n"
-                    "Ensure HelixDB is reachable and the query is correct."
+                # Add timeout to database query (5 seconds)
+                res = await asyncio.wait_for(
+                    asyncio.to_thread(db.query, "getSimilarDiffsByVector", {"vec": vec, "k": 8}),
+                    timeout=5
                 )
+            except asyncio.TimeoutError:
+                # If database query times out, continue without examples
+                res = []
+            except Exception as db_exc:
+                # If database query fails, continue without examples
+                res = []
             # Result rows include commit_message, summary, file_path
             examples = []
             if isinstance(res, list):
@@ -189,4 +217,4 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)

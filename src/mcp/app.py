@@ -14,6 +14,12 @@ mcp = FastMCP[Any]("glide")
 
 HELIX_API_ENDPOINT = os.getenv("HELIX_API_ENDPOINT", "")
 
+
+# Helper function to run subprocess calls asynchronously to avoid blocking stdio
+async def run_subprocess(args: List[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run subprocess.run() in a thread to avoid blocking stdio transport."""
+    return await asyncio.to_thread(subprocess.run, args, **kwargs)
+
 @mcp.tool
 async def draft_pr():
     instructions = [
@@ -35,13 +41,13 @@ async def split_commit():
     try:
         # 1) Collect changed files and per-file unified diffs
         # Check staged, unstaged, and untracked files
-        staged_proc = subprocess.run(
+        staged_proc = await run_subprocess(
             ["git", "diff", "--cached", "--name-only"], capture_output=True, text=True
         )
-        unstaged_proc = subprocess.run(
+        unstaged_proc = await run_subprocess(
             ["git", "diff", "--name-only"], capture_output=True, text=True
         )
-        untracked_proc = subprocess.run(
+        untracked_proc = await run_subprocess(
             ["git", "ls-files", "--others", "--exclude-standard"],
             capture_output=True,
             text=True,
@@ -67,13 +73,13 @@ async def split_commit():
         file_to_diff: Dict[str, str] = {}
         for path in changed_files:
             # Try staged diff first, then unstaged
-            p = subprocess.run(
+            p = await run_subprocess(
                 ["git", "diff", "--cached", "--", path], capture_output=True, text=True
             )
             if p.returncode == 0 and p.stdout.strip():
                 file_to_diff[path] = p.stdout
             else:
-                p = subprocess.run(
+                p = await run_subprocess(
                     ["git", "diff", "--", path], capture_output=True, text=True
                 )
                 if p.returncode == 0 and p.stdout.strip():
@@ -190,8 +196,8 @@ async def split_commit():
         # 4) Commit each file separately with its suggested message
         for file_path, message in suggestions:
             try:
-                subprocess.run(["git", "add", "--", file_path], check=True)
-                subprocess.run(["git", "commit", "-m", message], check=True)
+                await run_subprocess(["git", "add", "--", file_path], check=True)
+                await run_subprocess(["git", "commit", "-m", message], check=True)
             except subprocess.CalledProcessError as e:
                 return (
                     f"Failed to add or commit '{file_path}' with message '{message}'.\n"

@@ -27,15 +27,18 @@ async def draft_pr():
 async def split_commit():
     try:
         # 1) Collect changed files and per-file unified diffs
-        # Check both staged and unstaged changes
+        # Check staged, unstaged, and untracked files
         staged_proc = subprocess.run(["git", "diff", "--cached", "--name-only"], capture_output=True, text=True)
         unstaged_proc = subprocess.run(["git", "diff", "--name-only"], capture_output=True, text=True)
+        untracked_proc = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], capture_output=True, text=True)
         
         changed_files = set()
         if staged_proc.returncode == 0:
             changed_files.update(f.strip() for f in staged_proc.stdout.splitlines() if f.strip())
         if unstaged_proc.returncode == 0:
             changed_files.update(f.strip() for f in unstaged_proc.stdout.splitlines() if f.strip())
+        if untracked_proc.returncode == 0:
+            changed_files.update(f.strip() for f in untracked_proc.stdout.splitlines() if f.strip())
         
         if not changed_files:
             return "no changes detected (working tree clean)"
@@ -50,6 +53,16 @@ async def split_commit():
                 p = subprocess.run(["git", "diff", "--", path], capture_output=True, text=True)
                 if p.returncode == 0 and p.stdout.strip():
                     file_to_diff[path] = p.stdout
+                else:
+                    # For untracked/new files, read the entire file content as the "diff"
+                    try:
+                        with open(path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            # Format as a new file addition diff
+                            file_to_diff[path] = f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(content.splitlines())} @@\n+{chr(10).join('+'+line for line in content.splitlines())}"
+                    except (FileNotFoundError, UnicodeDecodeError):
+                        # File might not exist or not be text
+                        continue
 
         if not file_to_diff:
             return "no per-file diffs produced"

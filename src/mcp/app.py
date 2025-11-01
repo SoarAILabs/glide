@@ -17,8 +17,68 @@ HELIX_API_ENDPOINT = os.getenv("HELIX_API_ENDPOINT", "")
 
 # Helper function to run subprocess calls asynchronously to avoid blocking stdio
 async def run_subprocess(args: List[str], **kwargs) -> subprocess.CompletedProcess:
-    """Run subprocess.run() in a thread to avoid blocking stdio transport."""
-    return await asyncio.to_thread(subprocess.run, args, **kwargs)
+    """Run subprocess calls asynchronously to avoid blocking stdio transport."""
+    # Use asyncio.create_subprocess_exec instead of subprocess.run to avoid blocking
+    capture_output = kwargs.pop('capture_output', False)
+    text = kwargs.pop('text', False)
+    check = kwargs.pop('check', False)  # Handle check parameter separately
+    
+    # CRITICAL: Set stdin to DEVNULL to prevent subprocess from inheriting 
+    # the MCP stdio stdin, which causes deadlocks
+    stdin = kwargs.pop('stdin', asyncio.subprocess.DEVNULL)
+    
+    # Prepare stdout and stderr based on capture_output and text
+    if capture_output:
+        stdout = asyncio.subprocess.PIPE
+        stderr = asyncio.subprocess.PIPE
+    else:
+        stdout = kwargs.pop('stdout', None)
+        stderr = kwargs.pop('stderr', None)
+    
+    # Only pass valid parameters to asyncio.create_subprocess_exec
+    # Filter out any subprocess.run() specific parameters that aren't valid
+    # Explicitly remove check and other invalid params to prevent errors
+    kwargs.pop('check', None)  # Extra safety: ensure check is removed
+    kwargs.pop('timeout', None)  # timeout handled by asyncio.wait_for elsewhere
+    kwargs.pop('input', None)  # input not supported in async subprocess
+    
+    valid_exec_kwargs = {}
+    allowed_params = {'cwd', 'env', 'start_new_session', 'shell', 'preexec_fn', 
+                      'executable', 'bufsize', 'close_fds', 'pass_fds', 
+                      'restore_signals', 'umask', 'limit', 'creationflags'}
+    for key, value in kwargs.items():
+        if key in allowed_params:
+            valid_exec_kwargs[key] = value
+        # Silently ignore other parameters
+    
+    # Final safety check: ensure check is not in valid_exec_kwargs
+    assert 'check' not in valid_exec_kwargs, "check parameter should not be passed to subprocess"
+    
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdin=stdin,
+        stdout=stdout,
+        stderr=stderr,
+        **valid_exec_kwargs
+    )
+    
+    stdout_data, stderr_data = await process.communicate()
+    
+    # Create a CompletedProcess-like object
+    result = subprocess.CompletedProcess(
+        args=args,
+        returncode=process.returncode,
+        stdout=stdout_data.decode('utf-8') if text and stdout_data else stdout_data,
+        stderr=stderr_data.decode('utf-8') if text and stderr_data else stderr_data,
+    )
+    
+    # If check=True, raise CalledProcessError on non-zero return code
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, args, result.stdout, result.stderr
+        )
+    
+    return result
 
 @mcp.tool
 async def draft_pr():

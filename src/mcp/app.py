@@ -15,6 +15,44 @@ mcp = FastMCP[Any]("glide")
 HELIX_API_ENDPOINT = os.getenv("HELIX_API_ENDPOINT", "")
 
 
+async def find_git_root(start_path: str = None) -> str:
+    """
+    Find the git repository root directory.
+    
+    Args:
+        start_path: Directory to start searching from (defaults to current working directory)
+        
+    Returns:
+        Path to the git repository root, or None if not in a git repository
+    """
+    if start_path is None:
+        start_path = os.getcwd()
+    
+    # Use git rev-parse --show-toplevel to find the git root
+    # Use asyncio.create_subprocess_exec directly to avoid circular dependency
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            "rev-parse",
+            "--show-toplevel",
+            cwd=start_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+        )
+        stdout_data, stderr_data = await process.communicate()
+        
+        if process.returncode == 0:
+            git_root = stdout_data.decode('utf-8').strip()
+            if git_root:
+                return git_root
+    except (FileNotFoundError, OSError):
+        # Git not found or other OS error
+        pass
+    
+    return None
+
+
 # Helper function to run subprocess calls asynchronously to avoid blocking stdio
 async def run_subprocess(args: List[str], **kwargs) -> subprocess.CompletedProcess:
     """Run subprocess calls asynchronously to avoid blocking stdio transport."""
@@ -101,18 +139,30 @@ async def draft_pr():
 )
 async def split_commit():
     try:
+        # Detect the git repository root from current working directory
+        workspace_root = await find_git_root()
+        if not workspace_root:
+            return "error: not in a git repository. Please run this tool from within a git repository."
+        
         # 1) Collect changed files and per-file unified diffs
         # Check staged, unstaged, and untracked files
         staged_proc = await run_subprocess(
-            ["git", "diff", "--cached", "--name-only"], capture_output=True, text=True
+            ["git", "diff", "--cached", "--name-only"], 
+            capture_output=True, 
+            text=True,
+            cwd=workspace_root
         )
         unstaged_proc = await run_subprocess(
-            ["git", "diff", "--name-only"], capture_output=True, text=True
+            ["git", "diff", "--name-only"], 
+            capture_output=True, 
+            text=True,
+            cwd=workspace_root
         )
         untracked_proc = await run_subprocess(
             ["git", "ls-files", "--others", "--exclude-standard"],
             capture_output=True,
             text=True,
+            cwd=workspace_root
         )
 
         changed_files = set()
@@ -136,20 +186,28 @@ async def split_commit():
         for path in changed_files:
             # Try staged diff first, then unstaged
             p = await run_subprocess(
-                ["git", "diff", "--cached", "--", path], capture_output=True, text=True
+                ["git", "diff", "--cached", "--", path], 
+                capture_output=True, 
+                text=True,
+                cwd=workspace_root
             )
             if p.returncode == 0 and p.stdout.strip():
                 file_to_diff[path] = p.stdout
             else:
                 p = await run_subprocess(
-                    ["git", "diff", "--", path], capture_output=True, text=True
+                    ["git", "diff", "--", path], 
+                    capture_output=True, 
+                    text=True,
+                    cwd=workspace_root
                 )
                 if p.returncode == 0 and p.stdout.strip():
                     file_to_diff[path] = p.stdout
                 else:
                     # For untracked/new files, read the entire file content as the "diff"
+                    # Paths from git are relative to workspace root, so join them
+                    file_path = os.path.join(workspace_root, path) if not os.path.isabs(path) else path
                     try:
-                        with open(path, "r", encoding="utf-8") as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             content = f.read()
                             # Format as a new file addition diff
                             file_to_diff[path] = (
@@ -257,8 +315,16 @@ async def split_commit():
         # 4) Commit each file separately with its suggested message
         for file_path, message in suggestions:
             try:
-                await run_subprocess(["git", "add", "--", file_path], check=True)
-                await run_subprocess(["git", "commit", "-m", message], check=True)
+                await run_subprocess(
+                    ["git", "add", "--", file_path], 
+                    check=True,
+                    cwd=workspace_root
+                )
+                await run_subprocess(
+                    ["git", "commit", "-m", message], 
+                    check=True,
+                    cwd=workspace_root
+                )
             except subprocess.CalledProcessError as e:
                 return (
                     f"Failed to add or commit '{file_path}' with message '{message}'.\n"

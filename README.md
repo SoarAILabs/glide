@@ -24,7 +24,8 @@ uv run python -m src.mcp.app
 
 **One-Click Install:**
 
-[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en-US/install-mcp?name=glide&config=eyJ1cmwiOiJodHRwOi8vMTI3LjAuMC4xOjgwMDAvbWNwIn0%3D)
+
+[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en-US/install-mcp?name=glide&config=eyJjb21tYW5kIjoidXYgLS1kaXJlY3RvcnkgUEFUSFxcVE9cXFlPVVJcXGdsaWRlXFxESVJFQ1RPUlkgcnVuIHNyYy9tY3AvYXBwLnB5In0%3D)
 
 **Manual Installation:**
 

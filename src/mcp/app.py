@@ -27,11 +27,9 @@ async def draft_pr():
     return result
 
 
-@mcp.tool(
-    name="split_commit",
-    description="Splits a large unified diff / commit into smaller semantically-grouped commits.",
-)
+@mcp.tool
 async def split_commit():
+    """Splits a large unified diff / commit into smaller semantically-grouped commits."""
     try:
         # 1) Collect changed files and per-file unified diffs
         # Check staged, unstaged, and untracked files

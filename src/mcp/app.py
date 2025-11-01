@@ -27,13 +27,15 @@ async def run_subprocess(args: List[str], **kwargs) -> subprocess.CompletedProce
     # the MCP stdio stdin, which causes deadlocks
     stdin = kwargs.pop('stdin', asyncio.subprocess.DEVNULL)
     
-    # Prepare stdout and stderr based on capture_output and text
-    if capture_output:
-        stdout = asyncio.subprocess.PIPE
-        stderr = asyncio.subprocess.PIPE
-    else:
-        stdout = kwargs.pop('stdout', None)
-        stderr = kwargs.pop('stderr', None)
+    # CRITICAL: Always capture stdout/stderr to PIPE to prevent subprocess output
+    # from leaking into the MCP stdio communication channel (which breaks JSON parsing)
+    # In stdio mode, parent's stdout/stderr IS the MCP communication channel, so we must
+    # always capture subprocess output to prevent git messages from breaking JSON protocol
+    stdout = asyncio.subprocess.PIPE
+    stderr = asyncio.subprocess.PIPE
+    # Remove any stdout/stderr from kwargs since we're overriding them
+    kwargs.pop('stdout', None)
+    kwargs.pop('stderr', None)
     
     # Only pass valid parameters to asyncio.create_subprocess_exec
     # Filter out any subprocess.run() specific parameters that aren't valid
@@ -234,12 +236,11 @@ async def split_commit():
                 f"SIMILAR EXAMPLES:\n{example_block}"
             )
             try:
-                # Add timeout to prevent hanging (30 seconds per file)
                 commit_message = await asyncio.wait_for(
-                    complete(user_prompt, system=system_prompt, max_tokens=40),
+                    complete(user_prompt, system=system_prompt),
                     timeout=30.0
                 )
-                commit_message = (commit_message or "").strip().splitlines()[0][:72]
+                commit_message = (commit_message or "").strip().splitlines()[0].strip()
                 if not commit_message:
                     commit_message = f"Update {os.path.basename(file_path)}"
             except asyncio.TimeoutError:

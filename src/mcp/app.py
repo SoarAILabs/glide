@@ -11,6 +11,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP[Any]("glide")
 
+
 @mcp.tool
 async def draft_pr():
     instructions = [
@@ -23,43 +24,67 @@ async def draft_pr():
         result += f"{i}. {instruction}\n\n"
     return result
 
-@mcp.tool(name="split_commit", description="Splits a large unified diff / commit into smaller semantically-grouped commits.")
+
+@mcp.tool(
+    name="split_commit",
+    description="Splits a large unified diff / commit into smaller semantically-grouped commits.",
+)
 async def split_commit():
     try:
         # 1) Collect changed files and per-file unified diffs
         # Check staged, unstaged, and untracked files
-        staged_proc = subprocess.run(["git", "diff", "--cached", "--name-only"], capture_output=True, text=True)
-        unstaged_proc = subprocess.run(["git", "diff", "--name-only"], capture_output=True, text=True)
-        untracked_proc = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], capture_output=True, text=True)
-        
+        staged_proc = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], capture_output=True, text=True
+        )
+        unstaged_proc = subprocess.run(
+            ["git", "diff", "--name-only"], capture_output=True, text=True
+        )
+        untracked_proc = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            capture_output=True,
+            text=True,
+        )
+
         changed_files = set()
         if staged_proc.returncode == 0:
-            changed_files.update(f.strip() for f in staged_proc.stdout.splitlines() if f.strip())
+            changed_files.update(
+                f.strip() for f in staged_proc.stdout.splitlines() if f.strip()
+            )
         if unstaged_proc.returncode == 0:
-            changed_files.update(f.strip() for f in unstaged_proc.stdout.splitlines() if f.strip())
+            changed_files.update(
+                f.strip() for f in unstaged_proc.stdout.splitlines() if f.strip()
+            )
         if untracked_proc.returncode == 0:
-            changed_files.update(f.strip() for f in untracked_proc.stdout.splitlines() if f.strip())
-        
+            changed_files.update(
+                f.strip() for f in untracked_proc.stdout.splitlines() if f.strip()
+            )
+
         if not changed_files:
             return "no changes detected (working tree clean)"
 
         file_to_diff: Dict[str, str] = {}
         for path in changed_files:
             # Try staged diff first, then unstaged
-            p = subprocess.run(["git", "diff", "--cached", "--", path], capture_output=True, text=True)
+            p = subprocess.run(
+                ["git", "diff", "--cached", "--", path], capture_output=True, text=True
+            )
             if p.returncode == 0 and p.stdout.strip():
                 file_to_diff[path] = p.stdout
             else:
-                p = subprocess.run(["git", "diff", "--", path], capture_output=True, text=True)
+                p = subprocess.run(
+                    ["git", "diff", "--", path], capture_output=True, text=True
+                )
                 if p.returncode == 0 and p.stdout.strip():
                     file_to_diff[path] = p.stdout
                 else:
                     # For untracked/new files, read the entire file content as the "diff"
                     try:
-                        with open(path, 'r', encoding='utf-8') as f:
+                        with open(path, "r", encoding="utf-8") as f:
                             content = f.read()
                             # Format as a new file addition diff
-                            file_to_diff[path] = f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(content.splitlines())} @@\n+{chr(10).join('+'+line for line in content.splitlines())}"
+                            file_to_diff[path] = (
+                                f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(content.splitlines())} @@\n+{chr(10).join('+'+line for line in content.splitlines())}"
+                            )
                     except (FileNotFoundError, UnicodeDecodeError):
                         # File might not exist or not be text
                         continue
@@ -74,16 +99,17 @@ async def split_commit():
         db = helix.Client(local=True)
 
         for file_path, diff_text in file_to_diff.items():
-            vec_batch = embed_code(diff_text, file_path=file_path)  # returns a batch; take first vector
+            vec_batch = embed_code(
+                diff_text, file_path=file_path
+            )  # returns a batch; take first vector
             if not vec_batch:
                 continue
             vec = vec_batch[0]
-            
 
-            try: 
+            try:
                 # 3) ANN search for similar diffs; k kept small to keep it snappy
                 res = db.query("getSimilarDiffsByVector", {"vec": vec, "k": 8})
-            except Exception as db_exc: 
+            except Exception as db_exc:
                 return (
                     f"Database query failed for file '{file_path}': {str(db_exc)}\n"
                     f"Exception type: {type(db_exc).__name__}\n"
@@ -98,7 +124,9 @@ async def split_commit():
                         ex_sum = row.get("summary") or ""
                         ex_path = row.get("file_path") or ""
                         if ex_msg or ex_sum:
-                            examples.append(f"file:{ex_path}\nmessage:{ex_msg}\nsummary:{ex_sum}")
+                            examples.append(
+                                f"file:{ex_path}\nmessage:{ex_msg}\nsummary:{ex_sum}"
+                            )
 
             example_block = "\n\n".join(examples) if examples else ""
             system_prompt = (
@@ -111,7 +139,9 @@ async def split_commit():
                 f"SIMILAR EXAMPLES:\n{example_block}"
             )
             try:
-                commit_message = await complete(user_prompt, system=system_prompt, max_tokens=40)
+                commit_message = await complete(
+                    user_prompt, system=system_prompt, max_tokens=40
+                )
                 commit_message = (commit_message or "").strip().splitlines()[0][:72]
                 if not commit_message:
                     commit_message = f"Update {os.path.basename(file_path)}"
@@ -125,10 +155,10 @@ async def split_commit():
 
         # 4) Commit each file separately with its suggested message
         for file_path, message in suggestions:
-            try: 
+            try:
                 subprocess.run(["git", "add", "--", file_path], check=True)
                 subprocess.run(["git", "commit", "-m", message], check=True)
-            except subprocess.CalledProcessError as e: 
+            except subprocess.CalledProcessError as e:
                 return (
                     f"Failed to add or commit '{file_path}' with message '{message}'.\n"
                     f"Git error: {e}\n"
@@ -145,6 +175,7 @@ async def split_commit():
             f"Exception type: {type(e).__name__}\n"
             "Ensure git is available and HelixDB is reachable on localhost:6969."
         )
+
 
 @mcp.tool
 async def resolve_conflict():

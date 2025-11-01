@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 import subprocess
 import json
 import os
+import asyncio
 
 import helix
 
@@ -20,7 +21,7 @@ async def draft_pr():
         "step 3: use the edit file tool to write a new PR_DRAFT.md file for the project.",
     ]
     result = "draft pr instructions: \n\n"
-    for i, instruction in enumerate[str](instructions, 1):
+    for i, instruction in enumerate(instructions, 1):
         result += f"{i}. {instruction}\n\n"
     return result
 
@@ -139,13 +140,18 @@ async def split_commit():
                 f"SIMILAR EXAMPLES:\n{example_block}"
             )
             try:
-                commit_message = await complete(
-                    user_prompt, system=system_prompt, max_tokens=40
+                # Add timeout to prevent hanging (30 seconds per file)
+                commit_message = await asyncio.wait_for(
+                    complete(user_prompt, system=system_prompt, max_tokens=40),
+                    timeout=30.0
                 )
                 commit_message = (commit_message or "").strip().splitlines()[0][:72]
                 if not commit_message:
                     commit_message = f"Update {os.path.basename(file_path)}"
-            except Exception:
+            except asyncio.TimeoutError:
+                commit_message = f"Update {os.path.basename(file_path)}"
+            except Exception as llm_exc:
+                # Log the error but continue with fallback message
                 commit_message = f"Update {os.path.basename(file_path)}"
 
             suggestions.append((file_path, commit_message))
@@ -183,4 +189,4 @@ async def resolve_conflict():
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)
+    mcp.run(transport="stdio")

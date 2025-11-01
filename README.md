@@ -22,6 +22,12 @@ uv run python -m src.mcp.app
 
 ### 4. Configure Cursor to use your local MCP server
 
+**One-Click Install:**
+
+[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en-US/install-mcp?name=glide&config=eyJ1cmwiOiJodHRwOi8vMTI3LjAuMC4xOjgwMDAvbWNwIn0%3D)
+
+**Manual Installation:**
+
 Add the following to your `mcp.json` configuration in Cursor:
 
 ```json

@@ -25,6 +25,23 @@ async def find_git_root(start_path: str = None) -> str:
     Returns:
         Path to the git repository root, or None if not in a git repository
     """
+    # First, try to get workspace root from common environment variables
+    # MCP clients like Cursor might set these
+    env_vars = [
+        "MCP_WORKSPACE_ROOT",
+        "CURSOR_WORKSPACE_ROOT", 
+        "WORKSPACE_ROOT",
+        "WORKSPACE_FOLDER",
+        "PROJECT_ROOT"
+    ]
+    
+    for env_var in env_vars:
+        workspace_from_env = os.getenv(env_var)
+        if workspace_from_env and os.path.isdir(workspace_from_env):
+            # Try to find git root starting from this directory
+            start_path = workspace_from_env
+            break
+    
     if start_path is None:
         start_path = os.getcwd()
     
@@ -137,12 +154,37 @@ async def draft_pr():
     name="split_commit",
     description="Splits a large unified diff / commit into smaller semantically-grouped commits.",
 )
-async def split_commit():
+async def split_commit(workspace_root: str = None):
+    """
+    Split a large commit into smaller semantic commits.
+    
+    Args:
+        workspace_root: Optional path to the workspace root directory. 
+                        If not provided, will attempt to detect from environment variables or current directory.
+    """
     try:
-        # Detect the git repository root from current working directory
-        workspace_root = await find_git_root()
-        if not workspace_root:
-            return "error: not in a git repository. Please run this tool from within a git repository."
+        # Detect the git repository root
+        if workspace_root:
+            # If provided, use it directly
+            detected_root = await find_git_root(workspace_root)
+            if detected_root:
+                workspace_root = detected_root
+            elif not os.path.isdir(workspace_root):
+                return f"error: provided workspace_root '{workspace_root}' does not exist or is not a directory."
+            # If workspace_root is provided but not a git repo, we'll still try to use it
+            # (git commands will fail with a clear error if it's not a git repo)
+        else:
+            # Try to auto-detect
+            workspace_root = await find_git_root()
+            if not workspace_root:
+                cwd = os.getcwd()
+                return (
+                    f"error: could not detect git repository root.\n"
+                    f"Current working directory: {cwd}\n"
+                    f"Please either:\n"
+                    f"  1. Run this tool from within a git repository, or\n"
+                    f"  2. Provide the workspace_root parameter with the path to your git repository root."
+                )
         
         # 1) Collect changed files and per-file unified diffs
         # Check staged, unstaged, and untracked files
@@ -164,6 +206,18 @@ async def split_commit():
             text=True,
             cwd=workspace_root
         )
+        
+        # Check if git commands failed (might indicate not a git repo)
+        # Note: git commands can return non-zero even in valid repos (e.g., no changes)
+        # Only error if we get explicit "not a git repository" messages
+        error_messages = []
+        if staged_proc.returncode != 0 and staged_proc.stderr:
+            error_messages.append(staged_proc.stderr)
+        if "not a git repository" in " ".join(error_messages).lower():
+            error_msg = f"error: '{workspace_root}' is not a git repository.\n"
+            error_msg += f"Git error: {error_messages[0] if error_messages else 'Unknown error'}\n"
+            error_msg += "Please provide the correct path to your git repository root."
+            return error_msg
 
         changed_files = set()
         if staged_proc.returncode == 0:
@@ -237,24 +291,19 @@ async def split_commit():
             db = helix.Client(local=False, api_endpoint=api_endpoint)
 
         for file_path, diff_text in file_to_diff.items():
+            # 2a) Embed with timeout (5 seconds)
             try:
-                # 2a) Embed with timeout (5 seconds)
                 vec_batch = await asyncio.wait_for(
                     asyncio.to_thread(embed_code, diff_text, file_path=file_path),
                     timeout=5
                 )
             except asyncio.TimeoutError:
-                # If embedding times out, skip this file and use a fallback message
-                suggestions.append((file_path, f"Update {os.path.basename(file_path)}"))
-                continue
+                return f"error: embedding timed out for {file_path} (expected to always work)"
             except Exception as embed_exc:
-                # If embedding fails, skip this file
-                suggestions.append((file_path, f"Update {os.path.basename(file_path)}"))
-                continue
-                
+                return f"error: embedding failed for {file_path}: {str(embed_exc)} (expected to always work)"
+            
             if not vec_batch:
-                suggestions.append((file_path, f"Update {os.path.basename(file_path)}"))
-                continue
+                return f"error: embedding returned empty result for {file_path}"
             vec = vec_batch[0]
 
             try:
@@ -284,28 +333,112 @@ async def split_commit():
                             )
 
             example_block = "\n\n".join(examples) if examples else ""
+            
+            # Helper function to detect and reject generic messages
+            def is_generic_message(msg: str) -> bool:
+                """Check if a commit message is too generic."""
+                if not msg:
+                    return True
+                msg_lower = msg.lower().strip()
+                generic_patterns = [
+                    "update ",
+                    "fix bug",
+                    "fix issue",
+                    "refactor code",
+                    "changes",
+                    "wip",
+                    "misc",
+                    "cleanup",
+                    "minor",
+                    "temporary",
+                ]
+                # Check if message starts with generic patterns
+                for pattern in generic_patterns:
+                    if msg_lower.startswith(pattern):
+                        return True
+                # Check if message is just a filename (e.g., "Update app.py")
+                if msg_lower.startswith("update ") and len(msg_lower.split()) <= 3:
+                    return True
+                return False
+            
             system_prompt = (
-                "You are a senior engineer. Write a single, concise, conventional commit title "
-                "(<= 70 chars, imperative mood). No issue refs, no period. No generic messages like 'update', 'fix', 'refactor', etc. use the diff to generate a specific message. always use 'add:', 'chore:', 'feat:' etc to start the message."
+                """You are a senior engineer writing conventional commit messages. Analyze the diff carefully to understand what actually changed.
+
+CRITICAL REQUIREMENTS:
+- Write ONLY a single, concise commit title (under 50 characters preferred)
+- Use conventional commit format: type(scope): description
+- Common types: feat, fix, refactor, docs, style, test, chore, perf, build, ci
+- No issue references, no trailing period
+- Be SPECIFIC about what changed - analyze the actual code changes in the diff
+- Output ONLY the commit message title, nothing else (no explanations, no prefixes, no quotes)
+
+STRICT PROHIBITIONS - NEVER USE THESE PATTERNS:
+- "Update [filename]" (e.g., "Update app.py") - ABSOLUTELY FORBIDDEN
+- "Fix bug" - TOO GENERIC
+- "Refactor code" - TOO GENERIC  
+- "Changes" - TOO GENERIC
+- "WIP" - TOO GENERIC
+- Any message that doesn't describe what actually changed
+
+GUIDELINES:
+- Analyze the actual code changes in the diff to determine the type and description
+- For new features: use "feat:" - describe what capability was added (e.g., "feat(auth): add JWT token validation")
+- For bug fixes: use "fix:" - describe what was broken and fixed (e.g., "fix(api): handle null response in user endpoint")
+- For refactoring: use "refactor:" - describe what was improved without changing behavior (e.g., "refactor(utils): extract common validation logic")
+- For configuration/build: use "chore:" or "build:" - describe what was configured (e.g., "chore(deps): update dependencies")
+- For documentation: use "docs:" - describe what documentation was added/changed (e.g., "docs(api): add endpoint documentation")
+- Include the affected component/file in scope if it adds clarity
+
+EXAMPLES OF GOOD MESSAGES:
+- "feat(auth): add JWT token validation"
+- "fix(api): handle null response in user endpoint"
+- "refactor(utils): extract common validation logic"
+- "chore(deps): update numpy to 2.0.0"
+- "docs(readme): add installation instructions"
+
+EXAMPLES OF BAD MESSAGES (DO NOT USE):
+- "Update app.py" ❌
+- "Fix bug" ❌
+- "Refactor code" ❌
+- "Changes" ❌
+
+Remember: Your output must be SPECIFIC and describe WHAT changed, not generic file operations."""
             )
             user_prompt = (
                 "Generate a commit message for this diff. Consider similar past changes if given.\n\n"
                 f"DIFF (truncated if long):\n{diff_text}\n\n"
-                f"SIMILAR EXAMPLES:\n{example_block}"
+                f"SIMILAR EXAMPLES:\n{example_block}\n\n"
+                "Output ONLY the commit message title, nothing else."
             )
+            
+            # Call Cerebras inference - should always work
             try:
-                commit_message = await asyncio.wait_for(
-                    complete(user_prompt, system=system_prompt),
+                raw_response = await asyncio.wait_for(
+                    complete(user_prompt, system=system_prompt, max_tokens=100),
                     timeout=30.0
                 )
-                commit_message = (commit_message or "").strip().splitlines()[0].strip()
-                if not commit_message:
-                    commit_message = f"Update {os.path.basename(file_path)}"
             except asyncio.TimeoutError:
-                commit_message = f"Update {os.path.basename(file_path)}"
+                return f"error: Cerebras inference timed out for {file_path} (expected to always work)"
             except Exception as llm_exc:
-                # Log the error but continue with fallback message
-                commit_message = f"Update {os.path.basename(file_path)}"
+                return f"error: Cerebras inference failed for {file_path}: {str(llm_exc)} (expected to always work)"
+            
+            if not raw_response:
+                return f"error: Cerebras inference returned empty response for {file_path}"
+            
+            commit_message = raw_response.strip().splitlines()[0].strip()
+            
+            # Remove quotes if present
+            if commit_message.startswith('"') and commit_message.endswith('"'):
+                commit_message = commit_message[1:-1]
+            if commit_message.startswith("'") and commit_message.endswith("'"):
+                commit_message = commit_message[1:-1]
+            
+            # Validate the message is not generic - fail if it is
+            if not commit_message or is_generic_message(commit_message):
+                return (
+                    f"error: Cerebras inference generated generic message '{commit_message}' for {file_path}. "
+                    f"Please improve the system prompt or check the inference output."
+                )
 
             suggestions.append((file_path, commit_message))
 

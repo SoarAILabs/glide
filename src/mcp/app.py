@@ -228,11 +228,11 @@ async def split_commit():
             example_block = "\n\n".join(examples) if examples else ""
             system_prompt = (
                 "You are a senior engineer. Write a single, concise, conventional commit title "
-                "(<= 70 chars, imperative mood). No issue refs, no period."
+                "(<= 70 chars, imperative mood). No issue refs, no period. No generic messages like 'update', 'fix', 'refactor', etc. use the diff to generate a specific message. always use 'add:', 'chore:', 'feat:' etc to start the message."
             )
             user_prompt = (
                 "Generate a commit message for this diff. Consider similar past changes if given.\n\n"
-                f"DIFF (truncated if long):\n{diff_text[:8000]}\n\n"
+                f"DIFF (truncated if long):\n{diff_text}\n\n"
                 f"SIMILAR EXAMPLES:\n{example_block}"
             )
             try:

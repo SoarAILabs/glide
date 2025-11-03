@@ -2,7 +2,16 @@ from helix.embedding.voyageai_client import VoyageAIEmbedder
 from helix import Chunk
 import os
 
-voyage_embedder = VoyageAIEmbedder()
+# Lazy-loaded embedder - only created when needed
+_voyage_embedder = None
+
+
+def _get_embedder():
+    """Get or create the voyage embedder instance (lazy initialization)."""
+    global _voyage_embedder
+    if _voyage_embedder is None:
+        _voyage_embedder = VoyageAIEmbedder()
+    return _voyage_embedder
 
 
 def embed_code(code: str, file_path: str = None):
@@ -44,6 +53,7 @@ def embed_code(code: str, file_path: str = None):
         # Fallback to token_chunk if code_chunk fails
         code_chunks = Chunk.token_chunk(code)
 
+    voyage_embedder = _get_embedder()
     code_embeddings = voyage_embedder.embed_batch([f"{code_chunks}"])
 
     return code_embeddings

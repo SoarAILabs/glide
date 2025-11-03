@@ -482,6 +482,11 @@ async def resolve_conflict():
     return "resolve conflict ran successfully"
 
 
+def main():
+    """Entry point for the glide-mcp package."""
+    mcp.run(transport="stdio")
+
+
 if __name__ == "__main__":
     # mcp.run(transport="streamable-http", host="127.0.0.1", port=8000)
-    mcp.run(transport="stdio")
+    main()

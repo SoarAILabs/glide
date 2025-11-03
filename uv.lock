@@ -970,8 +970,8 @@ wheels = [
 ]
 
 [[package]]
-name = "glide"
-version = "0.1.0"
+name = "glide-mcp"
+version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "black" },

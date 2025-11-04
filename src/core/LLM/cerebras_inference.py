@@ -7,7 +7,7 @@ from cerebras.cloud.sdk import AsyncCerebras
 load_dotenv()
 
 # Default model; override per-call via the `model` argument
-DEFAULT_MODEL_ID: str = os.getenv("CEREBRAS_MODEL_ID", "qwen-3-32b")
+DEFAULT_MODEL_ID: str = os.getenv("CEREBRAS_MODEL_ID", "qwen-3-coder-480b")
 
 _async_client: Optional[AsyncCerebras] = None
 

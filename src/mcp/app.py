@@ -5,6 +5,7 @@ import subprocess
 import json
 import os
 import asyncio
+import re
 from dotenv import load_dotenv
 import helix
 from fastmcp import FastMCP
@@ -274,6 +275,13 @@ async def split_commit(workspace_root: str = None):
                 if not msg:
                     return True
                 msg_lower = msg.lower().strip()
+                
+                # Reject reasoning tag patterns
+                if ("redacted_reasoning" in msg_lower or 
+                    "<think>" in msg_lower or 
+                    "</think>" in msg_lower):
+                    return True
+                
                 generic_patterns = [
                     "update ",
                     "fix bug",
@@ -329,15 +337,15 @@ EXAMPLES OF GOOD MESSAGES:
 - "docs(readme): add installation instructions"
 
 EXAMPLES OF BAD MESSAGES (DO NOT USE):
-- "Update app.py" ❌
-- "Fix bug" ❌
-- "Refactor code" ❌
-- "Changes" ❌
+- "Update app.py"
+- "Fix bug"
+- "Refactor code"
+- "Changes"
 
 Remember: Your output must be SPECIFIC and describe WHAT changed, not generic file operations."""
             )
             user_prompt = (
-                "Generate a commit message for this diff. Consider similar past changes if given.\n\n"
+                "/no_think\n\nGenerate a commit message for this diff. Consider similar past changes if given.\n\n"
                 f"DIFF (truncated if long):\n{diff_text}\n\n"
                 f"SIMILAR EXAMPLES:\n{example_block}\n\n"
                 "Output ONLY the commit message title, nothing else."
@@ -345,7 +353,7 @@ Remember: Your output must be SPECIFIC and describe WHAT changed, not generic fi
             
             try:
                 raw_response = await asyncio.wait_for(
-                    complete(user_prompt, system=system_prompt, max_tokens=100),
+                    complete(user_prompt, system=system_prompt, temperature=0.0),
                     timeout=30.0
                 )
             except asyncio.TimeoutError:
@@ -356,7 +364,19 @@ Remember: Your output must be SPECIFIC and describe WHAT changed, not generic fi
             if not raw_response:
                 return f"error: Cerebras inference returned empty response for {file_path}"
             
-            commit_message = raw_response.strip().splitlines()[0].strip()
+            # Strip reasoning tags from response (e.g., <think>, </think>, <think>, etc.)
+            cleaned_response = raw_response.strip()
+            # Remove XML-like reasoning tags
+            cleaned_response = re.sub(r'<[^>]*think[^>]*>', '', cleaned_response, flags=re.IGNORECASE)
+            cleaned_response = re.sub(r'<[^>]*reasoning[^>]*>', '', cleaned_response, flags=re.IGNORECASE)
+            cleaned_response = re.sub(r'<[^>]*redacted[^>]*>', '', cleaned_response, flags=re.IGNORECASE)
+            
+            # Extract first non-empty line after cleaning
+            lines = [line.strip() for line in cleaned_response.splitlines() if line.strip()]
+            if not lines:
+                return f"error: No valid commit message found in response for {file_path} after cleaning reasoning tags"
+            
+            commit_message = lines[0]
             
             if commit_message.startswith('"') and commit_message.endswith('"'):
                 commit_message = commit_message[1:-1]

@@ -7,3 +7,5 @@ target/
 __pycache__/
 
 glide.egg-info/
+
+dist/

@@ -1,6 +1,6 @@
 [project]
 name = "glide-mcp"
-version = "0.1.8"
+version = "0.1.10"
 description = "mcp server that tries to save you from git troubles"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -8,6 +8,7 @@ dependencies = [
     "black>=25.9.0",
     "cerebras-cloud-sdk>=1.56.1",
     "fastmcp>=2.12.5",
+    "google-genai>=1.31.0",
     "helix-py>=0.2.30",
     "numpy>=2.3.4",
     "ollama>=0.6.0",

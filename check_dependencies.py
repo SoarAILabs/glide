@@ -17,7 +17,6 @@ IMPORT_TO_PACKAGE = {
     'openai': 'openai',
     'ollama': 'ollama',
     'cerebras': 'cerebras-cloud-sdk',
-    'google': 'google-genai',  # google.genai
     'numpy': 'numpy',
     'black': 'black',
     'pytest': 'pytest',

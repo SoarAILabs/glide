@@ -15,9 +15,19 @@ def _get_embedder():
 
 
 def embed_code(code: str, file_path: str = None):
-
-    # For diffs, use token_chunk instead of code_chunk since diffs are text format
-    # and code_chunk has API compatibility issues
+    """
+    Embed code or diff text using VoyageAI embeddings.
+    
+    For diffs, uses token_chunk instead of code_chunk since diffs are text format
+    and code_chunk has API compatibility issues.
+    
+    Args:
+        code: The code or diff text to embed
+        file_path: Optional file path to determine language for code_chunk
+        
+    Returns:
+        List of embeddings from VoyageAI
+    """
     try:
         # Try code_chunk first if we have a valid language
         if file_path:

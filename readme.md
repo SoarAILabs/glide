@@ -9,6 +9,14 @@ Glide is an MCP server that helps you write better commit messages and resolve m
 - **Vector Search**: Uses embeddings to find similar past commits for better context
 - **Multi-language Support**: Works with Python, JavaScript, TypeScript, Java, C++, and more
 
+## Prerequisites
+
+- **Python 3.13+** and `uv` package manager
+- **Git** installed and configured
+- **Ollama** installed locally (required for merge conflict resolution)
+  - Install: https://ollama.ai
+  - Pull the model: `ollama pull hf.co/SoarAILabs/breeze-3b:Q4_K_M`
+
 ## Quick Start
 
 
@@ -43,8 +51,11 @@ you can paste this in your mcp.json config in vs code.
 ```
 
 
-if you need te helix api endpoint env key please contact us through email: `bilwarad@mail.uc.edu` or add me or my co-founders on discord: 
+## Notes
 
-- Amaan : `amaanwastaken`
-- Ani: `aniruddg`
-- Vish: `vishesh.1301`
+- **Merge Conflict Resolution**: Requires Ollama running locally with the models pulled (see Prerequisites). This feature will use cloud inference providers in the future.
+- **API Keys**: Some features require API keys (VoyageAI, Cerebras, MorphLLM)
+- **Helix API Endpoint**: Contact us for access at `bilwarad@mail.uc.edu` or Discord:
+  - Amaan: `amaanwastaken`
+  - Ani: `aniruddg`
+  - Vish: `vishesh.1301`

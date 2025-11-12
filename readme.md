@@ -41,3 +41,10 @@ you can paste this in your mcp.json config in vs code.
         "args": ["--from", "git+https://github.com/SoarAILabs/glide.git", "glide"]
     }
 ```
+
+
+if you need te helix api endpoint env key please contact us through email: `bilwarad@mail.uc.edu` or add me or my co-founders on discord: 
+
+- Amaan : `amaanwastaken`
+- Ani: `aniruddg`
+- Vish: `vishesh.1301`

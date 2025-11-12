@@ -1,5 +1,5 @@
 from helix.embedding.voyageai_client import VoyageAIEmbedder
-from helix import Chunk
+from chonkie import Chunk
 import os
 
 # Lazy-loaded embedder - only created when needed

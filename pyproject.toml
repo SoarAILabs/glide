@@ -12,6 +12,7 @@ dependencies = [
     "google-genai>=1.45.0",
     "helix-py>=0.2.30",
     "numpy>=2.3.4",
+    "ollama>=0.6.0",
     "openai>=2.6.0",
     "python-dotenv>=1.1.1",
     "voyageai>=0.3.5",

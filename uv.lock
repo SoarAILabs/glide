@@ -982,6 +982,7 @@ dependencies = [
     { name = "numpy" },
     { name = "openai" },
     { name = "python-dotenv" },
+    { name = "voyageai" },
 ]
 
 [package.metadata]
@@ -994,6 +995,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.3.4" },
     { name = "openai", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
+    { name = "voyageai", specifier = ">=0.3.5" },
 ]
 
 [[package]]

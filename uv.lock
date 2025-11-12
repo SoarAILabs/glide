@@ -976,6 +976,7 @@ source = { editable = "." }
 dependencies = [
     { name = "black" },
     { name = "cerebras-cloud-sdk" },
+    { name = "chonkie" },
     { name = "fastmcp" },
     { name = "google-genai" },
     { name = "helix-py" },
@@ -989,6 +990,7 @@ dependencies = [
 requires-dist = [
     { name = "black", specifier = ">=25.9.0" },
     { name = "cerebras-cloud-sdk", specifier = ">=1.56.1" },
+    { name = "chonkie", specifier = ">=1.4.0" },
     { name = "fastmcp", specifier = ">=2.12.5" },
     { name = "google-genai", specifier = ">=1.45.0" },
     { name = "helix-py", specifier = ">=0.2.30" },

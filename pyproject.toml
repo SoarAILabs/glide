@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "black>=25.9.0",
     "cerebras-cloud-sdk>=1.56.1",
+    "chonkie>=1.4.0",
     "fastmcp>=2.12.5",
     "google-genai>=1.45.0",
     "helix-py>=0.2.30",

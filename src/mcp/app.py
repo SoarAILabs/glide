@@ -1,6 +1,8 @@
 from src.kite_exclusive.commit_splitter.services.voyage_service import embed_code
 from src.core.LLM.cerebras_inference import complete
-from typing import Any, Dict, List, Tuple
+from src.kite_exclusive.resolve_conflicts.core import resolve_merge_conflict
+from src.kite_exclusive.resolve_conflicts.morph_service import apply_code_edit
+from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 import json
 import os
@@ -418,10 +420,443 @@ Remember: Your output must be SPECIFIC and describe WHAT changed, not generic fi
     except Exception as e:
         return f"failed to split commit: {str(e)}"
 
+async def get_conflicted_files(workspace_root: str) -> List[str]:
+    """
+    Find all files with merge conflicts in the git repository.
+    
+    Checks both git's merge state and files with conflict markers directly.
+    
+    Args:
+        workspace_root: Path to the git repository root
+        
+    Returns:
+        List of file paths with merge conflicts
+    """
+    conflicted_files = set()
+    
+    # Method 1: Check git's merge state (for active merges)
+    try:
+        proc = await run_subprocess(
+            ["git", "ls-files", "-u"],
+            capture_output=True,
+            text=True,
+            cwd=workspace_root
+        )
+        
+        if proc.returncode == 0 and proc.stdout.strip():
+            # Extract unique file paths (git ls-files -u shows multiple entries per stage)
+            for line in proc.stdout.splitlines():
+                if line.strip():
+                    # Format: stage_number mode hash filename
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        file_path = ' '.join(parts[3:])  # Handle filenames with spaces
+                        conflicted_files.add(file_path)
+    except Exception:
+        pass
+    
+    # Method 2: Scan files for conflict markers (works even if not in active merge)
+    try:
+        # Get all tracked files (or modified files)
+        proc = await run_subprocess(
+            ["git", "ls-files"],
+            capture_output=True,
+            text=True,
+            cwd=workspace_root
+        )
+        
+        if proc.returncode == 0:
+            all_files = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+            
+            # Also check untracked/modified files
+            proc_modified = await run_subprocess(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                capture_output=True,
+                text=True,
+                cwd=workspace_root
+            )
+            if proc_modified.returncode == 0:
+                all_files.extend([line.strip() for line in proc_modified.stdout.splitlines() if line.strip()])
+            
+            # Pattern to match conflict markers
+            conflict_pattern = re.compile(r'^<<<<<<<', re.MULTILINE)
+            
+            for file_path in all_files:
+                full_path = os.path.join(workspace_root, file_path) if not os.path.isabs(file_path) else file_path
+                
+                # Skip if already found via git ls-files -u
+                if file_path in conflicted_files:
+                    continue
+                
+                try:
+                    # Only check text files (skip binary files)
+                    with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                        # Check for conflict markers
+                        if conflict_pattern.search(content):
+                            conflicted_files.add(file_path)
+                except (FileNotFoundError, UnicodeDecodeError, PermissionError):
+                    # Skip files we can't read
+                    continue
+    except Exception:
+        pass
+    
+    return sorted(list(conflicted_files))
 
-@mcp.tool
-async def resolve_conflict():
-    return "resolve conflict ran successfully"
+def extract_conflict_content(file_path: str, workspace_root: str) -> Tuple[str, str]:
+    """
+    Extract conflict content from a file.
+    
+    Args:
+        file_path: Relative path to the conflicted file
+        workspace_root: Path to the git repository root
+        
+    Returns:
+        Tuple of (original_file_content, conflict_text_with_markers)
+    """
+    full_path = os.path.join(workspace_root, file_path) if not os.path.isabs(file_path) else file_path
+    
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            original_content = f.read()
+        
+        # Extract conflict sections (between <<<<<<< and >>>>>>> markers)
+        conflict_pattern = re.compile(
+            r'<<<<<<<[^\n]*\n(.*?)\n=======\n(.*?)\n>>>>>>>[^\n]*',
+            re.DOTALL
+        )
+        
+        conflicts = conflict_pattern.findall(original_content)
+        if not conflicts:
+            # If no conflicts found with standard pattern, return the whole file
+            # as the conflict (might be a different conflict format)
+            return original_content, original_content
+        
+        # Combine all conflict sections
+        conflict_texts = []
+        for match in conflict_pattern.finditer(original_content):
+            conflict_texts.append(match.group(0))
+        
+        conflict_text = "\n\n".join(conflict_texts)
+        return original_content, conflict_text
+    except (FileNotFoundError, UnicodeDecodeError) as e:
+        raise RuntimeError(f"Failed to read file {file_path}: {str(e)}")
+
+def format_resolution_as_edit_snippet(original_content: str, conflict_text: str, resolution: str) -> Tuple[str, str]:
+    """
+    Format the resolution as an edit snippet for morphllm.
+    
+    Args:
+        original_content: Original file content with conflicts
+        conflict_text: The conflict section with markers
+        resolution: The resolved content from breeze model
+        
+    Returns:
+        Tuple of (instructions, edit_snippet)
+    """
+    # Find the conflict section in the original content
+    conflict_start = original_content.find(conflict_text)
+    if conflict_start == -1:
+        # If exact match not found, try to find by markers
+        conflict_start = original_content.find("<<<<<<<")
+    
+    if conflict_start == -1:
+        # Fallback: replace the entire conflict text
+        instructions = "Replace the merge conflict section with the resolved code."
+        edit_snippet = resolution
+        return instructions, edit_snippet
+    
+    # Find lines before and after conflict
+    lines_before = original_content[:conflict_start].splitlines()
+    lines_after = original_content[conflict_start + len(conflict_text):].splitlines()
+    
+    # Get context lines (last 3 lines before, first 3 lines after)
+    context_before = "\n".join(lines_before[-3:]) if lines_before else ""
+    context_after = "\n".join(lines_after[:3]) if lines_after else ""
+    
+    # Determine comment style based on file extension (simple heuristic)
+    # Default to // for most languages
+    comment_style = "//"
+    
+    # Build edit snippet
+    edit_lines = []
+    if context_before:
+        edit_lines.append(context_before)
+    edit_lines.append(f"{comment_style} ... existing code ...")
+    edit_lines.append(resolution)
+    edit_lines.append(f"{comment_style} ... existing code ...")
+    if context_after:
+        edit_lines.append(context_after)
+    
+    edit_snippet = "\n".join(edit_lines)
+    instructions = "Replace the merge conflict markers and conflicting code sections with the resolved code."
+    
+    return instructions, edit_snippet
+
+@mcp.tool(
+    name="resolve_conflict",
+    description="Detects merge conflicts in the repository, resolves them using AI, and applies the changes with MorphLLM. Changes are written to files immediately. Use revert_conflict_resolution to undo changes if needed.",
+)
+async def resolve_conflict(workspace_root: Optional[str] = None):
+    """
+    Detect and resolve merge conflicts using AI. Changes are applied immediately to files.
+    Review the previews and confirm or revert as needed.
+    
+    Args:
+        workspace_root: Optional path to the workspace root directory.
+                        If not provided, will attempt to detect from environment variables or current directory.
+    
+    Returns:
+        JSON string with applied resolutions and previews for review
+    """
+    global _resolved_conflicts
+    
+    try:
+        if workspace_root:
+            detected_root = await find_git_root(workspace_root)
+            if detected_root:
+                workspace_root = detected_root
+            elif not os.path.isdir(workspace_root):
+                return json.dumps({"error": f"provided workspace_root '{workspace_root}' does not exist or is not a directory."})
+        else:
+            workspace_root = await find_git_root()
+            if not workspace_root:
+                cwd = os.getcwd()
+                return json.dumps({
+                    "error": "could not detect git repository root.",
+                    "current_directory": cwd,
+                    "message": "Please either run this tool from within a git repository, or provide the workspace_root parameter."
+                })
+        
+        # Find conflicted files
+        conflicted_files = await get_conflicted_files(workspace_root)
+        
+        if not conflicted_files:
+            return json.dumps({
+                "message": "No merge conflicts detected.",
+                "resolved_files": []
+            })
+        
+        resolved_files = []
+        _resolved_conflicts = {}  # Store for potential revert
+        
+        for file_path in conflicted_files:
+            try:
+                # Extract conflict content
+                original_content, conflict_text = extract_conflict_content(file_path, workspace_root)
+                
+                # Get resolution from breeze model
+                try:
+                    resolution = await asyncio.wait_for(
+                        resolve_merge_conflict(conflict_text),
+                        timeout=60.0
+                    )
+                except asyncio.TimeoutError:
+                    resolved_files.append({
+                        "file": file_path,
+                        "status": "error",
+                        "error": "Breeze model timeout"
+                    })
+                    continue
+                except Exception as e:
+                    resolved_files.append({
+                        "file": file_path,
+                        "status": "error",
+                        "error": f"Breeze model failed: {str(e)}"
+                    })
+                    continue
+                
+                if not resolution:
+                    resolved_files.append({
+                        "file": file_path,
+                        "status": "error",
+                        "error": "Breeze model returned empty resolution"
+                    })
+                    continue
+                
+                # Format resolution as edit snippet
+                instructions, edit_snippet = format_resolution_as_edit_snippet(
+                    original_content, conflict_text, resolution
+                )
+                
+                # Apply via morphllm
+                try:
+                    final_content = await asyncio.wait_for(
+                        apply_code_edit(original_content, instructions, edit_snippet),
+                        timeout=60.0
+                    )
+                except asyncio.TimeoutError:
+                    resolved_files.append({
+                        "file": file_path,
+                        "status": "error",
+                        "error": "MorphLLM timeout"
+                    })
+                    continue
+                except Exception as e:
+                    resolved_files.append({
+                        "file": file_path,
+                        "status": "error",
+                        "error": f"MorphLLM failed: {str(e)}"
+                    })
+                    continue
+                
+                # Apply the change immediately by writing to file
+                full_path = os.path.join(workspace_root, file_path) if not os.path.isabs(file_path) else file_path
+                try:
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(final_content)
+                except Exception as e:
+                    resolved_files.append({
+                        "file": file_path,
+                        "status": "error",
+                        "error": f"Failed to write resolved content: {str(e)}"
+                    })
+                    continue
+                
+                # Store original content for potential revert
+                _resolved_conflicts[file_path] = {
+                    "workspace_root": workspace_root,
+                    "original_content": original_content,
+                    "resolved_content": final_content,
+                }
+                
+                # Create a simple diff preview (show before/after around conflict)
+                conflict_lines = conflict_text.splitlines()
+                conflict_preview = "\n".join(conflict_lines[:10])
+                if len(conflict_lines) > 10:
+                    conflict_preview += f"\n... ({len(conflict_lines) - 10} more lines) ..."
+                
+                resolved_lines = final_content.splitlines()
+                resolved_preview = "\n".join(resolved_lines[:30])
+                if len(resolved_lines) > 30:
+                    resolved_preview += f"\n... ({len(resolved_lines) - 30} more lines) ..."
+                
+                resolved_files.append({
+                    "file": file_path,
+                    "status": "applied",
+                    "conflict_preview": conflict_preview,
+                    "resolved_preview": resolved_preview,
+                    "message": "Changes have been applied to the file. Review and confirm to stage, or revert if needed."
+                })
+                
+            except Exception as e:
+                resolved_files.append({
+                    "file": file_path,
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        successful_count = len([f for f in resolved_files if f.get('status') == 'applied'])
+        result = {
+            "message": f"Applied resolutions to {successful_count} file(s). Changes have been written to files.",
+            "instruction": "Review the resolved files above. You can stage them yourself or use the commit splitter. If you want to undo the changes, call revert_conflict_resolution.",
+            "resolved_files": resolved_files
+        }
+        
+        return json.dumps(result, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": f"failed to resolve conflict: {str(e)}"})
+
+
+@mcp.tool(
+    name="revert_conflict_resolution",
+    description="Reverts the resolved conflict files back to their original state with conflicts. Use if you want to undo the changes applied by resolve_conflict.",
+)
+async def revert_conflict_resolution(file_path: Optional[str] = None, workspace_root: Optional[str] = None, revert_all: bool = False):
+    """
+    Revert resolved conflict files back to their original conflicted state.
+    
+    Args:
+        file_path: Optional path to a specific file to revert (relative to workspace root).
+                   If not provided and revert_all=False, reverts all pending resolutions.
+        workspace_root: Optional path to the workspace root directory.
+                        If not provided, will attempt to detect from environment variables or current directory.
+        revert_all: If True, revert all pending resolutions at once
+    
+    Returns:
+        JSON string with success/error status
+    """
+    global _resolved_conflicts
+    
+    try:
+        if workspace_root:
+            detected_root = await find_git_root(workspace_root)
+            if detected_root:
+                workspace_root = detected_root
+            elif not os.path.isdir(workspace_root):
+                return json.dumps({"error": f"provided workspace_root '{workspace_root}' does not exist or is not a directory."})
+        else:
+            workspace_root = await find_git_root()
+            if not workspace_root:
+                return json.dumps({"error": "could not detect git repository root."})
+        
+        if revert_all or not file_path:
+            # Revert all pending resolutions
+            if not _resolved_conflicts:
+                return json.dumps({
+                    "message": "No pending resolutions to revert."
+                })
+            
+            reverted_files = []
+            errors = []
+            
+            for path, resolution_data in list(_resolved_conflicts.items()):
+                try:
+                    # Verify workspace root matches
+                    if resolution_data["workspace_root"] != workspace_root:
+                        errors.append({"file": path, "error": "Workspace root mismatch"})
+                        continue
+                    
+                    full_path = os.path.join(workspace_root, path) if not os.path.isabs(path) else path
+                    
+                    # Write original content back to file
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(resolution_data["original_content"])
+                    
+                    reverted_files.append(path)
+                    del _resolved_conflicts[path]
+                    
+                except Exception as e:
+                    errors.append({"file": path, "error": str(e)})
+            
+            result = {
+                "message": f"Reverted {len(reverted_files)} file(s) back to conflicted state.",
+                "reverted_files": reverted_files,
+                "errors": errors if errors else None
+            }
+            return json.dumps(result, indent=2)
+        else:
+            # Revert single file
+            if file_path not in _resolved_conflicts:
+                return json.dumps({
+                    "error": f"No pending resolution found for '{file_path}'."
+                })
+            
+            resolution_data = _resolved_conflicts[file_path]
+            
+            # Verify workspace root matches
+            if resolution_data["workspace_root"] != workspace_root:
+                return json.dumps({
+                    "error": f"Workspace root mismatch. Expected '{resolution_data['workspace_root']}', got '{workspace_root}'."
+                })
+            
+            full_path = os.path.join(workspace_root, file_path) if not os.path.isabs(file_path) else file_path
+            
+            # Write original content back to file
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(resolution_data["original_content"])
+            
+            # Remove from pending resolutions
+            del _resolved_conflicts[file_path]
+            
+            return json.dumps({
+                "message": f"Reverted '{file_path}' back to conflicted state.",
+                "file": file_path
+            })
+            
+    except Exception as e:
+        return json.dumps({"error": f"failed to revert conflict resolution: {str(e)}"})
 
 
 def main():

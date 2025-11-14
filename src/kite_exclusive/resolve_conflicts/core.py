@@ -21,6 +21,7 @@ def _resolve_merge_conflict_sync(
     *,
     model: Optional[str] = None,
 ) -> str:
+    # Different test change
     """
     Resolve a merge conflict using the breeze model with Cerebras fallback.
     

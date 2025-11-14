@@ -4,6 +4,11 @@ from typing import Optional
 from dotenv import load_dotenv
 import ollama
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from core.LLM import cerebras_inference
+
 
 load_dotenv()
 
@@ -17,7 +22,7 @@ def _resolve_merge_conflict_sync(
     model: Optional[str] = None,
 ) -> str:
     """
-    Resolve a merge conflict using the breeze model.
+    Resolve a merge conflict using the breeze model with Cerebras fallback.
     
     Args:
         conflict_text: Merge conflict text with markers (<<<<<<<, =======, >>>>>>>)
@@ -39,8 +44,35 @@ def _resolve_merge_conflict_sync(
         
         resolved_content = response['response']
         return resolved_content.strip()
-    except Exception as e:
-        raise RuntimeError(f"Ollama error: {str(e)}")
+    except Exception as ollama_error:
+        print(f"Ollama failed ({str(ollama_error)}), falling back to Cerebras...")
+        
+        try:
+            system_prompt = (
+                "You are a merge conflict resolution assistant. "
+                "Analyze the merge conflict and return ONLY the resolved code without conflict markers. "
+                "Choose the best implementation from HEAD, base, or branch versions, or merge them intelligently."
+            )
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                resolved_content = loop.run_until_complete(
+                    cerebras_inference.complete(
+                        prompt=conflict_text,
+                        system=system_prompt,
+                        temperature=0.1, 
+                    )
+                )
+                return resolved_content.strip()
+            finally:
+                loop.close()
+        except Exception as cerebras_error:
+            raise RuntimeError(
+                f"Both Ollama and Cerebras failed. "
+                f"Ollama error: {str(ollama_error)}. "
+                f"Cerebras error: {str(cerebras_error)}"
+            )
 
 
 async def resolve_merge_conflict(

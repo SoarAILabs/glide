@@ -1,5 +1,5 @@
 from helix.embedding.voyageai_client import VoyageAIEmbedder
-from chonkie import Chunk
+from chonkie import TokenChunker, CodeChunker
 import os
 
 # Lazy-loaded embedder - only created when needed
@@ -44,14 +44,18 @@ def embed_code(code: str, file_path: str = None):
             }
             language = lang_map.get(ext.lower())
             if language:
-                code_chunks = Chunk.code_chunk(code, language=language)
+                chunker = CodeChunker(language=language)
+                code_chunks = chunker.chunk(code)
             else:
-                code_chunks = Chunk.token_chunk(code)
+                chunker = TokenChunker()
+                code_chunks = chunker.chunk(code)
         else:
-            code_chunks = Chunk.token_chunk(code)
+            chunker = TokenChunker()
+            code_chunks = chunker.chunk(code)
     except Exception:
         # Fallback to token_chunk if code_chunk fails
-        code_chunks = Chunk.token_chunk(code)
+        chunker = TokenChunker()
+        code_chunks = chunker.chunk(code)
 
     voyage_embedder = _get_embedder()
     code_embeddings = voyage_embedder.embed_batch([f"{code_chunks}"])
